@@ -1,0 +1,426 @@
+---
+title: "Week 5: Lab"
+subtitle: "EDS 223: Geospatial Analysis & Remote Sensing"
+author: "Ruth Oliver & Annie Adams"
+date: last-modified
+execute: 
+  eval: true
+  dir: project
+format:
+  html:
+    toc: true
+editor_options: 
+  chunk_output_type: console
+---
+
+::: {.gray-text .center-text}
+[terra](https://rspatial.github.io/terra/){target="_blank"}
+:::
+
+::: {.callout-note icon=true}
+# Source Materials
+The following materials are modified from [Chapter 6](https://r.geocompx.org/raster-vector#raster-vector) of *Geocomputation with R* by Robin Lovelace.
+:::
+
+In this lab we'll explore operations that rely on interactions between vector and raster datasets, including how to convert raster data into vector data.
+
+## 1. Set up
+
+First, we'll load all relevant packages.
+```{r}
+#| message: false
+#| warning: false
+library(sf) # vector handling
+library(terra) # raster handling
+library(tidyverse)
+library(tmap) # map making
+library(spData) # spatial data
+library(spDataLarge) # spatial data
+library(viridisLite)
+```
+
+Today we're heading back to Zion National Park in Utah to explore the interactions between vector and raster data.
+
+
+::: {.gray-text .center-text}
+[Photo from Unsplash](https://unsplash.com/photos/brown-mountains-with-forest-RWzPBcWVdpw){target="_blank"}
+:::
+
+We'll load the following data from the `{spDataLarge}` package:
+
+- `srtm.tif`: remotely sensed elevation estimates (raster data)
+- `zion.gpkg`: boundary of Zion National Park (vector data)
+
+```{r}
+# load raster dataset
+elevation <- rast(system.file("raster/srtm.tif", package = "spDataLarge"))
+
+# load vector dataset
+boundary <- read_sf(system.file("vector/zion.gpkg", package = "spDataLarge"))
+```
+
+:::{.callout-warning icon=true}
+# Remember to check the CRS!
+
+Whenever we work with multiple spatial datasets, we need check that the coordinate reference systems match. If they don't, we need to transform one to match the other.
+
+```{r}
+# Check if CRS match
+if(st_crs(elevation) == st_crs(boundary)) {
+  
+  print("Coordinate Reference Systems match")
+  
+} else {
+  
+  warning("Update CRS' to match")
+  
+}
+
+# Transform data to match
+boundary <- st_transform(boundary, st_crs(elevation))
+```
+:::
+
+
+```{r}
+tm_shape(elevation) +
+  tm_raster(col.legend = tm_legend(title = "Elvation (meters)")) +
+  tm_shape(boundary) +
+  tm_borders(lwd = 2)
+```
+
+
+## 2. Raster cropping
+
+Many geographic data projects involve integrating data from many different sources, such as remote sensing images (rasters) and administrative boundaries (vectors). Often the extent of input raster datasets is larger than the area of interest. In this case, raster cropping and masking are useful for unifying the spatial extent of input data. Both operations reduce object memory use and associated computational resources for subsequent analysis steps and may be a necessary preprocessing step when creating attractive maps involving raster data.
+
+First, let's crop the extent of the elevation raster to match the extent of Zion's boundaries. Through this process, we eliminate grid cells that fall outside the extent of the park and reduce the size of the raster. To do so, we use the `terra::crop()` function.
+
+```{r}
+elevation_cropped <- crop(elevation, boundary)
+```
+
+Beyond matching the extent, we can also set the values of raster cells outside of the boundaries or the park to `NA` using `terra::mask()`.
+```{r}
+# Mask raster based on vector object
+# (Cell outside of vector are converted to NA)
+elevation_masked <- mask(elevation, boundary)
+```
+
+Often, we will want to combine both cropping and masking to reduce the size of the raster as much as possible.
+
+```{r}
+elevation_final <- mask(elevation_cropped, boundary)
+```
+
+In some cases, we may want to mask the raster cells **inside** of the boundaries (i.e. assign cells inside the park to `NA`). We can do so with `terra::mask()` by setting the argument `inverse = TRUE`.
+
+```{r}
+elevation_inv_masked <- mask(elevation_cropped, boundary, inverse = TRUE)
+```
+
+
+```{r}
+map1 <- tm_shape(elevation) +
+  tm_raster(col.legend = tm_legend_hide()) +
+tm_shape(boundary) +
+  tm_borders(lwd = 2) +
+tm_title(text = "original")
+
+map2 <- tm_shape(elevation_cropped) +
+  tm_raster(col.legend = tm_legend_hide()) +
+tm_shape(boundary) +
+  tm_borders(lwd = 2) +
+tm_title(text =  "cropped")
+
+map3 <- tm_shape(elevation_masked) +
+  tm_raster(col.legend = tm_legend_hide()) +
+tm_shape(boundary) +
+  tm_borders(lwd = 2) +
+tm_title(text  = "masked")
+
+map4 <- tm_shape(elevation_final) +
+  tm_raster(col.legend = tm_legend_hide()) +
+tm_shape(boundary) +
+  tm_borders(lwd = 2) +
+tm_title(text =  "cropped & masked")
+
+map5 <- tm_shape(elevation_inv_masked) +
+  tm_raster(col.legend = tm_legend_hide()) +
+tm_shape(boundary) +
+  tm_borders(lwd = 2) +
+tm_title(text =  "inverse mask")
+
+tmap_arrange(map1, map2, map3, map4, map5, nrow = 2)
+```
+
+
+## 3. Raster vectorization
+
+There are several ways to convert raster data into vector. The most common, and straightforward, is converting raster grid cells into polygons. For more examples, check out [*Geocomputation with R*](https://r.geocompx.org/raster-vector#spatial-vectorization). 
+
+We could simply convert all grid cells into polygons, but it may be more helpful to create polygons based on some condition
+
+:::{.callout-tip icon=true}
+# Tip for HW3
+
+The following example is relevant to homework assignment 3!
+:::
+
+In this example, we'll select grid cells higher than 2000 meters by masking the elevation raster. We'll then convert these grid cells into polygons using the `terra::as.polygons()` function and turn this into a `sf` object.
+
+```{r}
+# Set all elevation values below 2000 to NA
+elevation_masked[elevation_masked < 2000] <- NA
+
+# Convert high elevation pixels into polygon shapes and the transform into a sf
+
+elevation_mask_poly <- as.polygons(elevation_masked) %>% 
+  st_as_sf()
+```
+
+
+
+```{r}
+map1 <- tm_shape(elevation_masked) +
+  tm_raster() +
+  tm_title( text = "masked raster")+ 
+  tm_layout(legend.position = c("left", "bottom"))
+
+map2 <- tm_shape(elevation_mask_poly) +
+  tm_polygons() +
+  tm_title(text = "vectorized raster")
+
+tmap_arrange(map1, map2, nrow = 1)
+```
+
+
+
+
+### Rayshader 
+
+[Rayshader](https://www.rayshader.com/) is an R package that creates beautiful 2D and 3D maps from elevation data. It uses various shading techniques to make terrain look realistic, including:
+
+Lambertian shading - simulates direct sunlight on slopes
+Ambient occlusion - adds shadows in valleys and crevices
+Hypsometric tinting - colors based on elevation (greens for low, browns/whites for high)
+Texture shading - emphasizes ridges and drainage patterns
+Sphere shading - adds natural ambient lighting effects
+
+These techniques can be layered together to create stunning, professional-quality terrain maps in just a few lines of code.
+
+
+#### Road trip! We are headed northeast to Bryce Canyon National Park!We will use the `rayshader` package, as well as `osmdata`to visualize the hoodoos of Bryce Canyon in 3D. 
+
+
+```{r}
+#| message: false
+#install.packages("rayshader")
+#install.packages("magick")
+#install.packages("osmdata")
+library(rayshader)
+library(magick)
+library(osmdata)
+library(raster)
+```
+
+
+
+
+```{r}
+bryce = raster("data/Bryce_Canyon.tif")
+
+bryce_mat = raster_to_matrix(bryce)
+
+bryce_small = resize_matrix(bryce_mat, 0.25)
+```
+
+
+
+#### Building Basemaps with Rayshader
+
+```{r}
+bryce_small %>% 
+  # Map colors to elevation values
+  height_shade() %>%  
+  # Plotting the map
+  plot_map() 
+```
+
+```{r}
+bryce_small %>% 
+  height_shade() %>% 
+  # Add desert -colored lighting at 50% transparency
+  add_overlay(sphere_shade(bryce_small, texture = "desert", 
+                           zscale = 4, colorintensity = 5), alphalayer = 0.5) %>%
+  # Add hillshade shadow()
+  add_shadow(lamb_shade(bryce_small, zscale = 6), 0) %>%
+  # Better defines ridges
+  add_shadow(ambient_shade(bryce_small), 0) %>%
+  # Add texture shading
+  add_shadow(texture_shade(bryce_small, detail = 8/10,contrast = 9,brightness = 11), 0.1) %>%
+  # Plotting the map
+  plot_map()
+```
+
+
+
+```{r}
+# Define bounding box coordinates for our area of interest
+utm_bbox <- c(xmin = 396367.4, xmax = 397975.2, 
+              ymin = 4163747.9, ymax = 4165291.0)
+```
+
+
+```{r}
+# Create extent object from bounding box coordinates
+extent_zoomed = extent(utm_bbox[1], utm_bbox[2], utm_bbox[3], utm_bbox[4])
+
+# Crop full Bryce raster to our area of interest
+bryce_zoom = crop(bryce, extent_zoomed)
+
+# Convert the cropped raster to a matrix for rayshader
+bryce_zoom_mat = raster_to_matrix(bryce_zoom)
+
+base_map = bryce_zoom_mat %>% 
+  height_shade() %>%
+  add_overlay(sphere_shade(bryce_zoom_mat, 
+                           texture = "desert", 
+                           colorintensity = 5), alphalayer = 0.5) %>%
+  add_shadow(lamb_shade(bryce_zoom_mat), 0) %>%
+  add_shadow(ambient_shade(bryce_zoom_mat), 0) %>% 
+  add_shadow(texture_shade(bryce_zoom_mat,
+                           detail = 8/10,
+                           contrast = 9,
+                           brightness = 11), 0.1)
+
+plot_map(base_map)
+```
+
+#### Using OSM to add features to our base map
+
+```{r}
+osm_bbox = c(-112.174228, 37.614998, -112.156230,37.629084)
+
+# Query OSM for all "highway" features (roads, paths, trails)
+bryce_highway = opq(osm_bbox) %>% 
+  add_osm_feature("highway") %>%
+  osmdata_sf() 
+
+bryce_highway
+```
+
+
+
+```{r}
+# Transform OSM to match the CRS of Bryce
+bryce_lines = st_transform(bryce_highway$osm_lines, crs = crs(bryce))
+
+tm_shape(bryce_lines) +
+  tm_lines(col = "black") +
+  tm_title(text = "Open Street Map `highway` attribute in Bryce Canyon National Park")
+```
+
+
+
+```{r}
+# Separate lines into trails, footpaths, and roads
+bryce_trails = bryce_lines %>% 
+  filter(highway %in% c("path", "bridleway"))
+
+bryce_footpaths = bryce_lines %>% 
+  filter(highway %in% c("footway"))
+
+bryce_roads = bryce_lines %>% 
+  filter(highway %in% c("unclassified", "secondary", "tertiary", "residential", "service"))
+```
+
+
+```{r}
+# Create a combine trails layer with different tyles for each type
+trails_layer = generate_line_overlay(bryce_footpaths, extent = extent_zoomed,
+                                    linewidth = 10, color="black", 
+                                    heightmap = bryce_zoom_mat) %>% 
+  add_overlay(generate_line_overlay(bryce_footpaths, extent = extent_zoomed,
+                                    linewidth = 6, color="white",
+                                    heightmap = bryce_zoom_mat)) %>%
+  add_overlay(generate_line_overlay(bryce_trails, extent = extent_zoomed,
+                                    linewidth = 3, color="black", lty = 3, offset = c(2, -2),
+                                    heightmap = bryce_zoom_mat)) %>%
+  add_overlay(generate_line_overlay(bryce_trails, extent = extent_zoomed,
+                                    linewidth = 3, color="white", lty = 3,
+                                    heightmap = bryce_zoom_mat)) %>%
+  add_overlay(generate_line_overlay(bryce_roads, extent = extent_zoomed,
+                                    linewidth = 8, color="grey30",
+                                    heightmap = bryce_zoom_mat)) 
+```
+
+
+```{r}
+bryce_water_lines = opq(osm_bbox) %>% 
+  add_osm_feature("waterway") %>% 
+  osmdata_sf() 
+
+tm_shape(bryce_water_lines$osm_lines) +
+  tm_lines(col = "blue") +
+  tm_title(text = "Open Street Map `waterway` attribute in Bryce Canyon National Park")
+```
+
+
+```{r}
+
+bryce_streams = st_transform(bryce_water_lines$osm_lines, crs = crs(bryce)) 
+
+stream_layer = generate_line_overlay(bryce_streams, extent = extent_zoomed,
+                                    linewidth = 4, color = "skyblue2", 
+                                    heightmap = bryce_zoom_mat)
+
+```
+
+
+```{r}
+bryce_tourism = opq(osm_bbox) %>% 
+  add_osm_feature("tourism") %>% 
+  osmdata_sf() 
+
+bryce_tourism_points = st_transform(bryce_tourism$osm_points, crs = crs(bryce))
+
+bryce_attractions = bryce_tourism_points %>% 
+  filter(tourism == "attraction")
+
+
+attraction_layer = generate_label_overlay(bryce_attractions, extent = extent_zoomed,
+                                     text_size = 2, point_size = 2, color = "white", 
+                                     halo_color = "black",
+                                     halo_expand = 10, 
+                                     halo_blur = 20, 
+                                     halo_alpha = 0.8,
+                                     heightmap = bryce_zoom_mat,
+                                     data_label_column = "name")
+```
+
+
+#### Create National Park Map 
+```{r}
+base_map %>% 
+  add_overlay(stream_layer, alphalayer = 0.8) %>% 
+  add_overlay(trails_layer) %>%
+  add_overlay(attraction_layer) %>% 
+  plot_map(title_text = "Bryce Canyon National Park, Utah",
+           title_bar_color = "lightgray", title_bar_alpha = 1)
+```
+
+
+
+#### Creating a 3D plot of Bryce Canyon's streams and trails
+
+```{r}
+base_map %>% 
+  add_overlay(stream_layer, alphalayer = 0.8) %>% 
+  add_overlay(trails_layer) %>%
+  plot_3d(bryce_zoom_mat, windowsize = c(1200, 800))
+
+render_camera(theta = 240, phi = 30, zoom = 0.3,  fov = 60)
+render_snapshot()
+```
+
