@@ -255,17 +255,6 @@ To train our decision tree, we first need to establish our model formula (i.e. w
 
 
 ```{r include=TRUE}
-
-```
-
-To understand how our decision tree will classify pixels, we can plot the results! 
-
-:::{.callout-tip icon=true}
-# Interpreting decision trees
-**Note:** The decision tree is comprised of a hierarchy of binary decisions. Each decision rule has 2 outcomes based on a conditional statement pertaining to values in each spectral band. 
-:::
-
-```{r}
 # Establish model formula
 SB_formula <- type ~ red + green + blue + NIR + SWIR1 + SWIR2
 
@@ -275,6 +264,13 @@ SB_decision_tree <- rpart(formula = SB_formula,
                           method = "class",
                           na.action = na.omit)
 ```
+
+To understand how our decision tree will classify pixels, we can plot the results! 
+
+:::{.callout-tip icon=true}
+# Interpreting decision trees
+**Note:** The decision tree is comprised of a hierarchy of binary decisions. Each decision rule has 2 outcomes based on a conditional statement pertaining to values in each spectral band. 
+:::
 
 ```{r}
 # Plot decision tree
@@ -400,6 +396,18 @@ landsat_df %>%
   arrange(cluster) %>% 
   knitr::kable(digits = 2,
                caption = "Mean spectral values by Cluster")
+
+# Create raster attribute table
+
+# Cluster 3 = Green Vegetation
+# Cluster 4 = Water
+# Cluster 1 = Soil / Dead Grass
+# Cluster 2 = Urban
+
+# Set category labels
+levels(SB_classification_kmeans) <- data.frame(
+  ID = 1:4, 
+  landcover = c("soil/dead grass", "urban", "green vegetation", "water"))
 ```
 
 ## 5. Plot Results 
@@ -407,7 +415,16 @@ landsat_df %>%
 Now we can plot the results and check out our land cover map!
 
 ```{r}
+kmeans_plot <- tm_shape(SB_classification_kmeans) +
+  tm_raster(
+    col.scale = tm_scale(
+      values = c("#F2DDA4", "#7E8987", "#8DB580", "#6A8EAE"),
+      labels = c("soil/dead grass", "urban", "green vegetation", "water")),
+    col.legend = tm_legend("Landcover Type")) +
+  tm_title(text = "K- Means Landcover Classification") + 
+  tm_layout(legend.position = c("left", "bottom"))
 
+kmeans_plot
 ```
 
 ## 6. Compare our decision tree and kmeans algorithm classification
@@ -416,6 +433,6 @@ Now let's compare our two approaches side-by-side! The decision tree used labele
 
 
 ```{r}
-
+tmap_arrange(dt_plot, kmeans_plot, nrow = 1)
 ```
 
